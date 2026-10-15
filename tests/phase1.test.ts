@@ -119,7 +119,7 @@ describe('Phase 1 Tests', () => {
         voided: false,
       };
 
-      const dto = mapCaptainBoardQuestionDTO(question, 'T01', []);
+      const dto = mapCaptainBoardQuestionDTO(question, 'T01', [], 2);
       expect((dto as any).stem).toBeUndefined();
       expect(dto.questionNo).toBe(2);
       expect(dto.status).toBe('open');

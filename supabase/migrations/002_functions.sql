@@ -240,7 +240,7 @@ begin
   v_after := to_jsonb(v_state);
 
   -- Set teams.r3_eligible = true for teams whose rank() is <= top_n_r3; all others false
-  update teams set r3_eligible = false;
+  update teams set r3_eligible = false where true;
 
   update teams t
   set r3_eligible = true
@@ -433,12 +433,14 @@ begin
     qualified = false,
     r3_eligible = false,
     pw_wrong = 0,
-    pw_blocked_until = null;
+    pw_blocked_until = null
+  where true;
 
   update students set
     absent = false,
     failed_logins = 0,
-    locked_until = null;
+    locked_until = null
+  where true;
 
   return jsonb_build_object('ok', true);
 end;

@@ -47,16 +47,19 @@ export interface TeaserPieceDTO {
   text: string;
 }
 
+export type QuestionStatus = 'open' | 'one_try_left' | 'correct' | 'locked' | 'voided';
+
 export interface MemberQuestionDTO {
   questionNo: number;
   stem: string;
   locationName: string;
+  status: QuestionStatus;
 }
 
 export interface CaptainBoardQuestionDTO {
   questionNo: number;
   options: OptionDTO[];
-  status: 'open' | 'one_try_left' | 'correct' | 'locked' | 'voided';
+  status: QuestionStatus;
 }
 
 export interface StateDTO {
@@ -125,31 +128,34 @@ export function mapRiddleDTO(
 }
 
 /**
- * Safe mapper for Captain Board (NO stems, only options shuffled deterministically and status)
+ * Status of a Round 2 question from its attempts (no points, no answers).
+ */
+export function questionStatus(
+  voided: boolean,
+  attempts: Array<{ try_no: number; correct: boolean }>,
+  maxTries: number
+): QuestionStatus {
+  if (voided) return 'voided';
+  if (attempts.some((a) => a.correct)) return 'correct';
+  if (attempts.length >= maxTries) return 'locked';
+  if (attempts.length === maxTries - 1 && attempts.length > 0) return 'one_try_left';
+  return 'open';
+}
+
+/**
+ * Safe mapper for the captain board (NO stems, only options shuffled deterministically and status)
  */
 export function mapCaptainBoardQuestionDTO(
   question: { question_no: number; id: number; options: OptionDTO[]; voided: boolean },
   teamId: string,
-  attempts: Array<{ try_no: number; correct: boolean }>
+  attempts: Array<{ try_no: number; correct: boolean }>,
+  maxTries: number
 ): CaptainBoardQuestionDTO {
   const seed = `${teamId}:r2:${question.id}`;
-  const shuffledOptions = seededShuffle(question.options, seed);
-
-  let status: 'open' | 'one_try_left' | 'correct' | 'locked' | 'voided' = 'open';
-  if (question.voided) {
-    status = 'voided';
-  } else if (attempts.some((a) => a.correct)) {
-    status = 'correct';
-  } else if (attempts.length === 1) {
-    status = 'one_try_left';
-  } else if (attempts.length >= 2) {
-    status = 'locked';
-  }
-
   return {
     questionNo: question.question_no,
-    options: shuffledOptions,
-    status,
+    options: seededShuffle(question.options, seed),
+    status: questionStatus(question.voided, attempts, maxTries),
   };
 }
 

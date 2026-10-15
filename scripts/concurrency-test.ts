@@ -60,8 +60,9 @@ async function ensureTestState() {
   const resetRes = await executeEventAction(db, 'reset', null, { confirm: 'RESET' });
   if (!resetRes.ok) throw new Error(`Reset failed: ${resetRes.message}`);
 
-  // Qualify a few teams
-  await db.from('teams').update({ qualified: true }).in('id', ['T01', 'T02', 'T03']);
+  // Qualify all 30 teams
+  const allTeams = Array.from({ length: 30 }, (_, i) => `T${String(i + 1).padStart(2, '0')}`);
+  await db.from('teams').update({ qualified: true }).in('id', allTeams);
 
   // Start R1 then close it to allow R2 start
   await executeEventAction(db, 'start-r1', null);
@@ -71,89 +72,52 @@ async function ensureTestState() {
   const r2Res = await executeEventAction(db, 'start-r2', null);
   if (!r2Res.ok) throw new Error(`Failed to start R2: ${r2Res.message}`);
 
-  console.log('  ✓ Event state: r2_running with T01, T02, T03 qualified.');
+  console.log('  ✓ Event state: r2_running with T01 to T30 qualified.');
 }
 
 // ─── test 1: last-slot race ──────────────────────────────────────────────────
 
 async function testLastSlotRace() {
   console.log('\n══════════════════════════════════════════');
-  console.log('TEST 1: Last-free-slot race (30 parallel scans → exactly 1 succeeds)');
+  console.log('TEST 1: Last-free-slot race (30 teams, 30 parallel scans → exactly 1 succeeds)');
   console.log('══════════════════════════════════════════');
 
-  // Use the first QR location; set capacity to 1 so only 1 can register
   const { data: qrRows } = await db
     .from('qr_locations')
     .select('id, name, token, capacity')
     .eq('active', true)
     .order('id')
     .limit(1);
-
   if (!qrRows || qrRows.length === 0) throw new Error('No active QR locations found. Run seed first.');
   const qr = qrRows[0];
 
-  // Set capacity to 1
   await db.from('qr_locations').update({ capacity: 1 }).eq('id', qr.id);
   console.log(`  QR: "${qr.name}" (id=${qr.id}) — capacity forced to 1`);
 
-  // Fetch T01's team members
-  const { data: students } = await db
-    .from('students')
-    .select('id, name, team_id, is_captain, absent')
-    .eq('team_id', 'T01')
-    .eq('absent', false);
+  // one scanning student per team
+  const { data: all } = await db.from('students').select('id, team_id').eq('absent', false).order('id');
+  const byTeam = new Map<string, string>();
+  for (const s of all ?? []) if (!byTeam.has(s.team_id)) byTeam.set(s.team_id, s.id);
+  const scanners = [...byTeam.values()];
+  if (scanners.length < 30) throw new Error(`Need 30 teams with a student, found ${scanners.length}.`);
 
-  if (!students || students.length < 3) {
-    throw new Error('Need at least 3 non-absent students in T01. Run seed first.');
+  console.log(`  Firing ${scanners.length} concurrent scans from ${scanners.length} different teams...`);
+  const results = await Promise.all(scanners.map((id) => registerScan(db, id, qr.token)));
+
+  const tally = countBy(results, (r: any) => (r.ok ? (r.already ? 'ok_already' : 'ok_new') : String(r.code)));
+  console.log('  Results:', JSON.stringify(tally));
+
+  const { data: regs } = await db.from('registrations').select('id').eq('qr_id', qr.id).eq('run', 1);
+  const dbCount = regs?.length ?? 0;
+  console.log(`  DB registrations for this QR in run 1: ${dbCount}`);
+
+  if (tally.ok_new !== 1 || tally.QR_FULL !== scanners.length - 1 || dbCount !== 1) {
+    throw new Error(`FAILED: expected 1 ok_new and ${scanners.length - 1} QR_FULL with 1 DB row.`);
   }
+  console.log('  ✓ PASS: exactly 1 success, rest QR_FULL, 1 row in DB.');
 
-  // Use 30 concurrent requests: all members of T01 + duplicates to simulate 30 callers
-  // In real tests only distinct students matter; for concurrency we fire many in parallel.
-  // We'll use the same set of students cycling through for a high-throughput race.
-  const CONCURRENT = 30;
-  const requests = Array.from({ length: CONCURRENT }, (_, i) => {
-    const student = students[i % students.length];
-    return registerScan(db, student.id, qr.token);
-  });
-
-  console.log(`  Firing ${CONCURRENT} concurrent scan requests...`);
-  const results = await Promise.all(requests);
-
-  const successCount = results.filter((r) => r.ok).length;
-  const qrFullCount = results.filter((r) => !r.ok && r.code === 'QR_FULL').length;
-  const alreadyCount = results.filter((r) => r.ok && r.already).length;
-  const otherFailures = results.filter((r) => !r.ok && r.code !== 'QR_FULL');
-
-  console.log(`  Results: ${successCount} ok (${alreadyCount} already), ${qrFullCount} QR_FULL, ${otherFailures.length} other`);
-
-  // With capacity=1, only 1 unique student should win a fresh slot.
-  // The rest either get QR_FULL or "already" (if same student retried).
-  const uniqueSuccessStudents = new Set(
-    results
-      .filter((r) => r.ok && !r.already)
-      .map((_, i) => students[i % students.length].id)
-  );
-
-  // Verify database: exactly 1 registration at this QR for run 1
-  const { data: regs } = await db
-    .from('registrations')
-    .select('id, student_id, slot_no')
-    .eq('qr_id', qr.id)
-    .eq('run', 1);
-
-  const actualRegistered = regs?.length ?? 0;
-  console.log(`  DB registrations for this QR in run 1: ${actualRegistered}`);
-
-  if (actualRegistered !== 1) {
-    throw new Error(
-      `FAILED: Expected exactly 1 registration in DB, got ${actualRegistered}. Concurrency protection is broken!`
-    );
-  }
-
-  console.log('  ✓ PASS: Exactly 1 registration stored in DB despite 30 concurrent requests.');
-
-  // Restore capacity
   await db.from('qr_locations').update({ capacity: qr.capacity }).eq('id', qr.id);
+  await ensureTestState(); // clean slate so tests 2 to 4 start fresh
 }
 
 // ─── test 2: two teammates same QR ──────────────────────────────────────────
@@ -329,6 +293,7 @@ async function testDomainRejections() {
   // Re-activate
   await db.from('qr_locations').update({ active: true }).eq('id', inactiveQr.id);
 
+  await db.from('teams').update({ qualified: false }).eq('id', 'T30');
   // NOT_IN_ROUND: use a student from non-qualified team
   const { data: nonQualTeam } = await db
     .from('teams')
