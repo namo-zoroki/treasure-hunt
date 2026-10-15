@@ -23,6 +23,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ALREADY_CLAIMED: 'Another team got there first.',
   CONTENT_MISSING: 'Something is not set up. Tell an organiser.',
   UNAUTHORIZED: 'You must be logged in to access this.',
+  DUPLICATE_REQUEST: 'Something went wrong. Reload and try again.',
+  RPC_ERROR: 'Something is not set up. Tell an organiser.',
   SETTING_LOCKED: 'This setting is locked and cannot be edited.',
 };
 

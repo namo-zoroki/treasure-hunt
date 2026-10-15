@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { getErrorMessage } from '@/lib/messages';
 
@@ -21,30 +21,34 @@ export default function ScanClient({ token }: { token: string }) {
   const [networkError, setNetworkError] = useState<string | null>(null);
   const scannedRef = useRef(false);
 
+  const doScan = useCallback(async () => {
+    setLoading(true);
+    setNetworkError(null);
+    try {
+      const res = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (res.status === 401) {
+        window.location.href = `/login?next=/s/${encodeURIComponent(token)}`;
+        return;
+      }
+      if (res.status >= 500) throw new Error('server');
+      setResult(await res.json());
+    } catch {
+      setNetworkError('Network error connecting to hunt server. Please retry.');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
   useEffect(() => {
-    // Only execute on mount in client JavaScript (prevents bot / link preview pre-registration)
+    // Only runs in client JavaScript on mount (link previews and prefetchers never register anyone).
     if (scannedRef.current) return;
     scannedRef.current = true;
-
-    async function doScan() {
-      try {
-        const res = await fetch('/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-
-        const data: ScanResult = await res.json();
-        setResult(data);
-      } catch (err: any) {
-        setNetworkError('Network error connecting to hunt server. Please retry.');
-      } finally {
-        setLoading(false);
-      }
-    }
-
     doScan();
-  }, [token]);
+  }, [doScan]);
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 w-full max-w-player mx-auto py-8 text-center">
@@ -63,11 +67,7 @@ export default function ScanClient({ token }: { token: string }) {
             <h2 className="text-lg font-bold text-slate-100">Connection Error</h2>
             <p className="text-xs text-red-300 mt-2">{networkError}</p>
             <button
-              onClick={() => {
-                scannedRef.current = false;
-                setLoading(true);
-                setNetworkError(null);
-              }}
+              onClick={doScan}
               className="mt-6 w-full py-3 px-4 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm border border-slate-600 transition-colors"
             >
               Retry Scan
