@@ -444,6 +444,158 @@ begin
 end;
 $$;
 
+create or replace function register_scan(p_student text, p_token text) returns jsonb language plpgsql as $$
+declare
+  v_student record;
+  v_team record;
+  v_qr record;
+  v_state record;
+  v_run int;
+  v_run_row record;
+  v_now bigint;
+  v_existing_reg record;
+  v_reg_count int;
+  v_free_slot int;
+  v_free_piece int;
+  v_piece_count int;
+begin
+  perform advance_event();
+
+  -- Player functions reject with PAUSED when event_state.paused_at is not null
+  select * into v_state from event_state where id = 1;
+  if v_state.paused_at is not null then
+    return jsonb_build_object('ok', false, 'code', 'PAUSED', 'message', 'The event is paused. Hang tight.');
+  end if;
+
+  if v_state.phase <> 'r2_running' then
+    return jsonb_build_object('ok', false, 'code', 'WRONG_PHASE', 'message', 'That is not open right now.');
+  end if;
+
+  -- 1. Load student and team
+  select * into v_student from students where id = p_student;
+  if not found then
+    return jsonb_build_object('ok', false, 'code', 'INVALID_LOGIN', 'message', 'Student ID or code is wrong.');
+  end if;
+
+  if v_student.absent then
+    return jsonb_build_object('ok', false, 'code', 'ABSENT', 'message', 'You are marked absent. Ask an organiser.');
+  end if;
+
+  select * into v_team from teams where id = v_student.team_id;
+  if not found or not v_team.qualified or v_team.withdrawn then
+    return jsonb_build_object('ok', false, 'code', 'NOT_IN_ROUND', 'message', 'Your team is not in this round.');
+  end if;
+
+  -- 2. Find QR by token
+  select * into v_qr from qr_locations where token = p_token;
+  if not found then
+    return jsonb_build_object('ok', false, 'code', 'INVALID_QR', 'message', 'This QR code is not valid.');
+  end if;
+
+  if not v_qr.active then
+    return jsonb_build_object('ok', false, 'code', 'QR_INACTIVE', 'message', 'This location is closed. Find another location.');
+  end if;
+
+  -- 3. Determine the run: current_run(team)
+  v_now := event_now_ms();
+  select * into v_run_row from team_run
+  where team_id = v_team.id and opens_ms <= v_now
+  order by run desc limit 1;
+
+  if not found or v_run_row.finished_ms is not null or v_now >= v_run_row.deadline_ms then
+    return jsonb_build_object('ok', false, 'code', 'WRONG_PHASE', 'message', 'That is not open right now.');
+  end if;
+
+  v_run := v_run_row.run;
+
+  -- 4. Lock order: QR row, then team row
+  perform 1 from qr_locations where id = v_qr.id for update;
+  perform 1 from teams where id = v_team.id for update;
+
+  -- 5. If this student already has a registration for this run
+  select * into v_existing_reg from registrations where student_id = v_student.id and run = v_run;
+  if found then
+    if v_existing_reg.qr_id = v_qr.id then
+      select piece_no into v_free_piece from piece_assignments
+      where team_id = v_team.id and run = v_run and student_id = v_student.id;
+
+      return jsonb_build_object(
+        'ok', true,
+        'already', true,
+        'run', v_run,
+        'piece_no', coalesce(v_free_piece, 1),
+        'qr_name', v_qr.name,
+        'n', v_team.n
+      );
+    else
+      return jsonb_build_object('ok', false, 'code', 'ALREADY_REGISTERED', 'message', 'You are already registered for this run.');
+    end if;
+  end if;
+
+  -- 6. If the team already has a registration at this QR for this run
+  if exists (select 1 from registrations where team_id = v_team.id and qr_id = v_qr.id and run = v_run) then
+    return jsonb_build_object('ok', false, 'code', 'TEAMMATE_HERE', 'message', 'A teammate already registered here. Find another location.');
+  end if;
+
+  -- 7. If this student has a registration at this QR in any run
+  if exists (select 1 from registrations where student_id = v_student.id and qr_id = v_qr.id) then
+    return jsonb_build_object('ok', false, 'code', 'QR_USED_BEFORE', 'message', 'You used this location before. Find another location.');
+  end if;
+
+  -- 8. If the team's piece assignments for this run already number N
+  select count(*) into v_piece_count from piece_assignments where team_id = v_team.id and run = v_run;
+  if v_piece_count >= v_team.n then
+    return jsonb_build_object('ok', false, 'code', 'TEAM_COMPLETE', 'message', 'Your team is already complete.');
+  end if;
+
+  -- 9. If registrations at this QR for this run are at or above capacity
+  select count(*) into v_reg_count from registrations where qr_id = v_qr.id and run = v_run;
+  if v_reg_count >= v_qr.capacity then
+    return jsonb_build_object('ok', false, 'code', 'QR_FULL', 'message', 'This location is full. Find another location.');
+  end if;
+
+  -- 10. Insert registration with slot_no = smallest free integer from 1 to capacity
+  select s into v_free_slot
+  from generate_series(1, v_qr.capacity) s
+  where not exists (
+    select 1 from registrations r where r.qr_id = v_qr.id and r.run = v_run and r.slot_no = s
+  )
+  order by s limit 1;
+
+  if v_free_slot is null then
+    return jsonb_build_object('ok', false, 'code', 'QR_FULL', 'message', 'This location is full. Find another location.');
+  end if;
+
+  -- Find piece_no = smallest free integer from 1 to N
+  select p into v_free_piece
+  from generate_series(1, v_team.n) p
+  where not exists (
+    select 1 from piece_assignments pa where pa.team_id = v_team.id and pa.run = v_run and pa.piece_no = p
+  )
+  order by p limit 1;
+
+  if v_free_piece is null then
+    return jsonb_build_object('ok', false, 'code', 'TEAM_COMPLETE', 'message', 'Your team is already complete.');
+  end if;
+
+  insert into registrations (run, team_id, student_id, qr_id, slot_no, created_ms)
+  values (v_run, v_team.id, v_student.id, v_qr.id, v_free_slot, v_now);
+
+  insert into piece_assignments (run, team_id, piece_no, student_id, via)
+  values (v_run, v_team.id, v_free_piece, v_student.id, 'scan');
+
+  -- 11. Return {ok:true, run, piece_no, qr_name, n}
+  return jsonb_build_object(
+    'ok', true,
+    'run', v_run,
+    'piece_no', v_free_piece,
+    'qr_name', v_qr.name,
+    'n', v_team.n
+  );
+end;
+$$;
+
 -- Security: grants and revocations
 revoke execute on all functions in schema public from public, anon, authenticated;
 grant execute on all functions in schema public to service_role;
+

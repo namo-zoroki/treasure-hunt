@@ -467,9 +467,17 @@ export default function AdminHQDashboard() {
 
           {/* QR Locations Capacity Overview */}
           <div className="p-5 rounded-xl bg-slate-800/80 border border-slate-700">
-            <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wide mb-3">
-              QR Locations ({data.stats.activeQRs} active)
-            </h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wide">
+                QR Locations ({data.stats.activeQRs} active)
+              </h2>
+              <a
+                href="/hq/qr"
+                className="text-xs font-semibold text-accent hover:underline"
+              >
+                Manage & Print →
+              </a>
+            </div>
             <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {data.qrs.map((qr) => (
                 <div

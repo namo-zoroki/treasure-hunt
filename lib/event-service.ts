@@ -577,3 +577,251 @@ export async function executeEventAction(
       return { ok: false, code: 'UNKNOWN_ACTION', message: `Unknown action: ${action}` };
   }
 }
+
+/**
+ * Atomic registration for a QR scan (Section 6.1).
+ */
+export async function registerScan(
+  client: SupabaseClient,
+  studentId: string,
+  token: string
+): Promise<{
+  ok: boolean;
+  code?: string;
+  message?: string;
+  already?: boolean;
+  run?: number;
+  piece_no?: number;
+  qr_name?: string;
+  n?: number;
+}> {
+  // 1. Try Postgres RPC first
+  const { data, error } = await client.rpc('register_scan', {
+    p_student: studentId,
+    p_token: token,
+  });
+
+  if (!error && data) {
+    return data;
+  }
+
+  if (error && error.code !== 'PGRST202') {
+    return { ok: false, code: 'RPC_ERROR', message: error.message };
+  }
+
+  // 2. Direct database execution fallback
+  await advanceEvent(client);
+
+  const { data: state } = await client.from('event_state').select('*').eq('id', 1).single();
+  if (state?.paused_at) {
+    return { ok: false, code: 'PAUSED', message: 'The event is paused. Hang tight.' };
+  }
+  if (state?.phase !== 'r2_running') {
+    return { ok: false, code: 'WRONG_PHASE', message: 'That is not open right now.' };
+  }
+
+  // 1. Load student and team
+  const { data: student } = await client
+    .from('students')
+    .select('id, name, absent, team_id')
+    .eq('id', studentId)
+    .single();
+
+  if (!student) {
+    return { ok: false, code: 'INVALID_LOGIN', message: 'Student ID or code is wrong.' };
+  }
+  if (student.absent) {
+    return { ok: false, code: 'ABSENT', message: 'You are marked absent. Ask an organiser.' };
+  }
+
+  const { data: team } = await client
+    .from('teams')
+    .select('id, name, n, qualified, withdrawn')
+    .eq('id', student.team_id)
+    .single();
+
+  if (!team || !team.qualified || team.withdrawn) {
+    return { ok: false, code: 'NOT_IN_ROUND', message: 'Your team is not in this round.' };
+  }
+
+  // 2. Find QR by token
+  const { data: qr } = await client
+    .from('qr_locations')
+    .select('id, name, token, capacity, active')
+    .eq('token', token)
+    .maybeSingle();
+
+  if (!qr) {
+    return { ok: false, code: 'INVALID_QR', message: 'This QR code is not valid.' };
+  }
+  if (!qr.active) {
+    return { ok: false, code: 'QR_INACTIVE', message: 'This location is closed. Find another location.' };
+  }
+
+  // 3. Determine current run: highest run in team_run where opens_ms <= eventNow
+  const wallNow = Date.now();
+  const eventNow = calcEventNowMs(wallNow, state);
+
+  const { data: runRows } = await client
+    .from('team_run')
+    .select('run, opens_ms, deadline_ms, finished_ms')
+    .eq('team_id', team.id)
+    .lte('opens_ms', eventNow)
+    .order('run', { ascending: false })
+    .limit(1);
+
+  const currentRun = runRows?.[0];
+  if (!currentRun || currentRun.finished_ms !== null || eventNow >= currentRun.deadline_ms) {
+    return { ok: false, code: 'WRONG_PHASE', message: 'That is not open right now.' };
+  }
+
+  const runNo = currentRun.run;
+
+  // 5. If this student already has a registration for this run
+  const { data: studentReg } = await client
+    .from('registrations')
+    .select('qr_id')
+    .eq('student_id', student.id)
+    .eq('run', runNo)
+    .maybeSingle();
+
+  if (studentReg) {
+    if (studentReg.qr_id === qr.id) {
+      const { data: pa } = await client
+        .from('piece_assignments')
+        .select('piece_no')
+        .eq('team_id', team.id)
+        .eq('run', runNo)
+        .eq('student_id', student.id)
+        .maybeSingle();
+
+      return {
+        ok: true,
+        already: true,
+        run: runNo,
+        piece_no: pa?.piece_no || 1,
+        qr_name: qr.name,
+        n: team.n,
+      };
+    } else {
+      return { ok: false, code: 'ALREADY_REGISTERED', message: 'You are already registered for this run.' };
+    }
+  }
+
+  // 6. If the team already has a registration at this QR for this run
+  const { data: teamAtQr } = await client
+    .from('registrations')
+    .select('id')
+    .eq('team_id', team.id)
+    .eq('qr_id', qr.id)
+    .eq('run', runNo)
+    .maybeSingle();
+
+  if (teamAtQr) {
+    return { ok: false, code: 'TEAMMATE_HERE', message: 'A teammate already registered here. Find another location.' };
+  }
+
+  // 7. If this student has a registration at this QR in any run
+  const { data: studentUsedBefore } = await client
+    .from('registrations')
+    .select('id')
+    .eq('student_id', student.id)
+    .eq('qr_id', qr.id)
+    .maybeSingle();
+
+  if (studentUsedBefore) {
+    return { ok: false, code: 'QR_USED_BEFORE', message: 'You used this location before. Find another location.' };
+  }
+
+  // 8. If the team's piece assignments for this run already number N
+  const { data: teamPieces } = await client
+    .from('piece_assignments')
+    .select('piece_no')
+    .eq('team_id', team.id)
+    .eq('run', runNo);
+
+  if (teamPieces && teamPieces.length >= team.n) {
+    return { ok: false, code: 'TEAM_COMPLETE', message: 'Your team is already complete.' };
+  }
+
+  // 9. If registrations at this QR for this run are at or above capacity
+  const { data: qrRegs } = await client
+    .from('registrations')
+    .select('slot_no')
+    .eq('qr_id', qr.id)
+    .eq('run', runNo);
+
+  if (qrRegs && qrRegs.length >= qr.capacity) {
+    return { ok: false, code: 'QR_FULL', message: 'This location is full. Find another location.' };
+  }
+
+  // 10. Smallest free slot_no from 1 to capacity
+  const occupiedSlots = new Set((qrRegs || []).map((r) => r.slot_no));
+  let freeSlot: number | null = null;
+  for (let s = 1; s <= qr.capacity; s++) {
+    if (!occupiedSlots.has(s)) {
+      freeSlot = s;
+      break;
+    }
+  }
+  if (!freeSlot) {
+    return { ok: false, code: 'QR_FULL', message: 'This location is full. Find another location.' };
+  }
+
+  // Smallest free piece_no from 1 to N
+  const occupiedPieces = new Set((teamPieces || []).map((p) => p.piece_no));
+  let freePiece: number | null = null;
+  for (let p = 1; p <= team.n; p++) {
+    if (!occupiedPieces.has(p)) {
+      freePiece = p;
+      break;
+    }
+  }
+  if (!freePiece) {
+    return { ok: false, code: 'TEAM_COMPLETE', message: 'Your team is already complete.' };
+  }
+
+  // Insert registration and piece assignment
+  const { error: regError } = await client.from('registrations').insert({
+    run: runNo,
+    team_id: team.id,
+    student_id: student.id,
+    qr_id: qr.id,
+    slot_no: freeSlot,
+    created_ms: eventNow,
+  });
+
+  if (regError) {
+    if (regError.code === '23505' || regError.message?.includes('duplicate key value')) {
+      const errStr = (regError.message + ' ' + ((regError as any).details || '')).toLowerCase();
+      if (errStr.includes('team_id') || errStr.includes('teammate')) {
+        return { ok: false, code: 'TEAMMATE_HERE', message: 'A teammate already registered here. Find another location.' };
+      }
+      if (errStr.includes('student_id') && errStr.includes('qr_id')) {
+        return { ok: false, code: 'QR_USED_BEFORE', message: 'You used this location before. Find another location.' };
+      }
+      if (errStr.includes('student_id') && errStr.includes('run')) {
+        return { ok: false, code: 'ALREADY_REGISTERED', message: 'You are already registered for this run.' };
+      }
+      return { ok: false, code: 'QR_FULL', message: 'This location is full. Find another location.' };
+    }
+    return { ok: false, code: 'DB_ERROR', message: regError.message };
+  }
+
+  await client.from('piece_assignments').insert({
+    run: runNo,
+    team_id: team.id,
+    piece_no: freePiece,
+    student_id: student.id,
+    via: 'scan',
+  });
+
+  return {
+    ok: true,
+    run: runNo,
+    piece_no: freePiece,
+    qr_name: qr.name,
+    n: team.n,
+  };
+}
+
