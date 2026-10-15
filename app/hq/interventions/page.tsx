@@ -7,6 +7,7 @@ const HQNav = () => (
   <nav className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs font-medium text-slate-400">
     <Link href="/hq" className="hover:text-accent transition-colors">Dashboard</Link>
     <Link href="/hq/teams" className="hover:text-accent transition-colors">Teams & Students</Link>
+    <Link href="/hq/selection" className="hover:text-accent transition-colors">Selection</Link>
     <Link href="/hq/content" className="hover:text-accent transition-colors">Content</Link>
     <Link href="/hq/qr" className="hover:text-accent transition-colors">QR Locations</Link>
     <Link href="/hq/interventions" className="text-accent">Interventions</Link>

@@ -54,3 +54,10 @@ export function submitAnswer(
     p_request: requestId,
   });
 }
+
+export function claimRound3(client: SupabaseClient, studentId: string, password: string) {
+  return callRpc(client, 'claim_round3', {
+    p_student: studentId,
+    p_password: password,
+  });
+}

@@ -28,3 +28,9 @@
 - Phase 6: Settings API checks phase boundaries and rejects modifications with `SETTING_LOCKED` when the event progresses past the specified lock point.
 - Phase 6: Admin interventions (`admin_register`, `reset_attempts`, `set_captain`, `edit_team_n`, `set_qualified`) run atomically in Postgres (`005_phase6.sql`) and write to `admin_log`.
 - Phase 6: Export endpoints serve UTF-8 CSVs for registrations, attempts, and standings with correct tie-break and rank computation.
+- Phase 7: R1 answer submission (`submit_answer` kind 'r1') locks team row, enforces phase `r1_running` before deadline, validates option existence, checks max tries (`tries_r1`), awards `r1_points_per_riddle` on correct, and returns idempotent result via `attempt_result()`.
+- Phase 7: `player_state` snapshot includes all riddles ordered by position with team attempt status (`open` | `correct` | `wrong`) during `r1_running` and `r1_closed` phases, and options are deterministically shuffled per team via `mapRiddleDTO` in `lib/state.ts`.
+- Phase 7: Selection page (`/hq/selection`) dynamically calculates R1 standings rank with tie-breaks (points desc, earliest point-earning attempt asc), pre-identifies top N teams, and enforces qualification changes strictly in `r1_closed` phase.
+- Phase 8: `claim_round3` enforces phase `r3_open`, checks `r3_eligible` team flag under lock, throttles wrong passwords per `password_max_wrong` and `password_lockout_s`, and guarantees exactly one winner via `insert into round3_claim (id, ...) values (1, ...) on conflict (id) do nothing`.
+- Phase 8: Winner screen prominently displays team ID, winning room number, and secret key info; non-winners receive `ALREADY_CLAIMED` screen; spectators outside top 5 remain on spectator view.
+- Phase 8: Admin panel features dedicated `/hq/round3` page with live winner banner enabling room organisers to verify team ID at the door against the database record.

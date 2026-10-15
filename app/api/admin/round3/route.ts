@@ -22,22 +22,41 @@ export async function GET() {
     return NextResponse.json({ ok: false, code: 'UNAUTHORIZED', message: 'Admin session required' }, { status: 401 });
   }
 
-  const { data: r3, error } = await db
-    .from('round3')
-    .select('clue_text, password_norm, key_info, room')
-    .eq('id', 1)
-    .single();
+  const [{ data: r3, error }, { data: eligibleTeams }, { data: claim }, { data: state }] = await Promise.all([
+    db.from('round3').select('clue_text, password_norm, key_info, room').eq('id', 1).single(),
+    db.from('teams').select('id, name, n, r3_eligible, withdrawn').eq('r3_eligible', true).order('id'),
+    db.from('round3_claim').select('id, team_id, student_id, created_ms').eq('id', 1).maybeSingle(),
+    db.from('event_state').select('phase').eq('id', 1).single(),
+  ]);
 
   if (error || !r3) {
     return NextResponse.json({ ok: false, code: 'DB_ERROR', message: error?.message || 'Round 3 config not found' });
   }
 
+  let winnerDetails = null;
+  if (claim) {
+    const [{ data: wTeam }, { data: wStudent }] = await Promise.all([
+      db.from('teams').select('id, name').eq('id', claim.team_id).single(),
+      db.from('students').select('id, name').eq('id', claim.student_id).single(),
+    ]);
+    winnerDetails = {
+      teamId: claim.team_id,
+      teamName: wTeam?.name || claim.team_id,
+      studentId: claim.student_id,
+      studentName: wStudent?.name || claim.student_id,
+      createdMs: claim.created_ms,
+    };
+  }
+
   return NextResponse.json({
     ok: true,
+    phase: state?.phase || 'setup',
     clueText: r3.clue_text,
     passwordNorm: r3.password_norm,
     keyInfo: r3.key_info,
     room: r3.room,
+    eligibleTeams: eligibleTeams || [],
+    winner: winnerDetails,
   });
 }
 

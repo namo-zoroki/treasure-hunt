@@ -215,6 +215,8 @@ export default function AdminHQDashboard() {
           <nav className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs font-medium text-slate-400">
             <Link href="/hq" className="text-accent">Dashboard</Link>
             <Link href="/hq/teams" className="hover:text-accent transition-colors">Teams & Students</Link>
+            <Link href="/hq/selection" className="hover:text-accent transition-colors">Selection</Link>
+            <Link href="/hq/round3" className="hover:text-accent transition-colors">Round 3</Link>
             <Link href="/hq/content" className="hover:text-accent transition-colors">Content</Link>
             <Link href="/hq/qr" className="hover:text-accent transition-colors">QR Locations</Link>
             <Link href="/hq/interventions" className="hover:text-accent transition-colors">Interventions</Link>

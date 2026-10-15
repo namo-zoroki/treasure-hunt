@@ -8,7 +8,9 @@
 - Phase 4: BUILT, SQL-tested on Postgres (sequential + concurrency).
 - Phase 5: DONE (Run timing, run 2 opening, deadlines, hard end & break, expired runs score 0, void_question, mark_absent, unmark_absent, cancel_registration)
 - Phase 6: DONE (Rest of admin panel: teams, interventions, dashboard detail, log, exports, settings, content CRUD)
-- Phases 7-9: NOT STARTED
+- Phase 7: DONE (Round 1: R1 quiz screen, submit_answer r1, standings ranking, selection API & HQ page)
+- Phase 8: DONE (Round 3: cipher clue, claim_round3 password atomic verification, throttle, winner screen, admin round3 verification page)
+- Phase 9: NOT STARTED
 
 ## 2. Files
 app/page.tsx | server check of session, renders Game | lib/session, components/Game | route /

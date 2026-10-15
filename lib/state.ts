@@ -1,6 +1,7 @@
 import {
   mapCaptainBoardQuestionDTO,
   mapPlayerMe,
+  mapRiddleDTO,
   questionStatus,
   type CaptainBoardQuestionDTO,
   type MemberQuestionDTO,
@@ -17,6 +18,8 @@ export interface RawPlayerState {
   eventNowMs: number;
   paused: boolean;
   phase: 'setup' | 'r1_running' | 'r1_closed' | 'r2_running' | 'r2_break' | 'r3_open' | 'ended';
+  r1DeadlineMs?: number | null;
+  triesR1?: number;
   triesR2: number;
   student: { id: string; name: string; isCaptain: boolean };
   team: { id: string; name: string; n: number; qualified: boolean; withdrawn: boolean; r3Eligible: boolean };
@@ -38,6 +41,18 @@ export interface RawPlayerState {
     voided: boolean;
     attempts: Array<{ try_no: number; correct: boolean }>;
   }>;
+  riddles?: Array<{
+    id: number;
+    position: number;
+    text: string;
+    options: Array<{ id: string; text: string }>;
+    attempts: Array<{ try_no: number; correct: boolean }>;
+  }>;
+  r3Clue?: string | null;
+  r3Claimed?: boolean;
+  r3WinnerTeamId?: string | null;
+  r3KeyInfo?: string | null;
+  r3Room?: string | null;
 }
 
 /**
@@ -57,15 +72,46 @@ export function buildState(raw: RawPlayerState): StateDTO {
   switch (raw.phase) {
     case 'setup':
       return { ...base, screen: 'WAIT_R1' };
-    case 'r1_running':
-      return { ...base, screen: 'R1', canSubmit: me.isCaptain, riddles: [] };
+    case 'r1_running': {
+      const riddles = (raw.riddles || []).map((r) => {
+        const lastAtt = r.attempts && r.attempts.length > 0 ? r.attempts[r.attempts.length - 1] : null;
+        return mapRiddleDTO(
+          {
+            id: r.id,
+            position: r.position,
+            text: r.text,
+            options: (r.options || []).map((o) => ({ id: o.id, text: o.text })),
+          },
+          raw.team.id,
+          lastAtt
+        );
+      });
+      return {
+        ...base,
+        screen: 'R1',
+        deadlineEventMs: raw.r1DeadlineMs ?? undefined,
+        canSubmit: me.isCaptain,
+        riddles,
+      };
+    }
     case 'r1_closed':
       return { ...base, screen: 'R1_DONE' };
     case 'r2_break':
       return { ...base, screen: inR2 ? 'R2_BREAK' : 'R2_SPECTATOR', message: inR2 ? undefined : 'Round 2 is for qualified teams. You can watch the fun.' };
     case 'r3_open':
-      screen = raw.team.r3Eligible ? 'R3' : 'R3_SPECTATOR';
-      return { ...base, screen, message: raw.team.r3Eligible ? undefined : 'You are not among the top 5 teams.' };
+      if (raw.team.r3Eligible) {
+        return {
+          ...base,
+          screen: 'R3',
+          clue: raw.r3Clue ?? undefined,
+          claimed: !!raw.r3Claimed,
+          winnerTeamId: raw.r3WinnerTeamId ?? undefined,
+          keyInfo: raw.r3KeyInfo ?? undefined,
+          room: raw.r3Room ?? undefined,
+        };
+      } else {
+        return { ...base, screen: 'R3_SPECTATOR', message: 'You are not among the top 5 teams.' };
+      }
     case 'ended':
       return { ...base, screen: 'ENDED' };
     case 'r2_running':
