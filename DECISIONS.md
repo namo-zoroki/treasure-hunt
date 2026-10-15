@@ -22,3 +22,4 @@
 - `void_question`: sets `voided = true`, creates a `score_adjustments` row with `max(0, full - already_earned)`, and re-evaluates whether the run is finished (advancing to run 2 if eligible).
 - `mark_absent`: sets `absent = true`, reassigns unassigned pieces (1..N) and any pieces currently held by the absent student to `move_to` teammate with `via='admin'`. Existing registrations are kept to preserve capacity slots.
 - `cancel_registration`: deletes the registration row and frees matching piece assignment held by that student, freeing up both the QR slot and piece number for another team member.
+- Admin event control bug fix: Client now guarantees sending `Content-Type: application/json` and `body: JSON.stringify(payload ?? {})` with a `finally` block resetting loading states on error; route handlers safely read text and default empty bodies to `{}` while still catching malformed JSON.

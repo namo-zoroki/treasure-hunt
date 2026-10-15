@@ -27,9 +27,10 @@ export async function POST(
   const action = rawAction.toLowerCase();
 
   let body: any = {};
-  if (request.headers.get('content-type')?.includes('application/json')) {
+  const text = await request.text();
+  if (text.trim().length > 0) {
     try {
-      body = await request.json();
+      body = JSON.parse(text);
     } catch {
       return NextResponse.json({ ok: false, code: 'BAD_REQUEST', message: 'Invalid JSON body' }, { status: 400 });
     }

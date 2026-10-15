@@ -129,7 +129,7 @@ export default function AdminHQDashboard() {
       const res = await fetch(`/api/admin/event/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: payload ? JSON.stringify(payload) : undefined,
+        body: JSON.stringify(payload ?? {}),
       });
       const result = await res.json();
       if (!result.ok) {
