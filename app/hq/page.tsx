@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 interface DashboardData {
   ok: boolean;
@@ -211,6 +212,15 @@ export default function AdminHQDashboard() {
             )}
           </div>
           <h1 className="text-xl font-bold text-slate-100 mt-1">Campus Treasure Hunt</h1>
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs font-medium text-slate-400">
+            <Link href="/hq" className="text-accent">Dashboard</Link>
+            <Link href="/hq/teams" className="hover:text-accent transition-colors">Teams & Students</Link>
+            <Link href="/hq/content" className="hover:text-accent transition-colors">Content</Link>
+            <Link href="/hq/qr" className="hover:text-accent transition-colors">QR Locations</Link>
+            <Link href="/hq/interventions" className="hover:text-accent transition-colors">Interventions</Link>
+            <Link href="/hq/logs" className="hover:text-accent transition-colors">Log & Export</Link>
+            <Link href="/hq/settings" className="hover:text-accent transition-colors">Settings</Link>
+          </nav>
         </div>
         <button
           onClick={handleLogout}

@@ -23,3 +23,8 @@
 - `mark_absent`: sets `absent = true`, reassigns unassigned pieces (1..N) and any pieces currently held by the absent student to `move_to` teammate with `via='admin'`. Existing registrations are kept to preserve capacity slots.
 - `cancel_registration`: deletes the registration row and frees matching piece assignment held by that student, freeing up both the QR slot and piece number for another team member.
 - Admin event control bug fix: Client now guarantees sending `Content-Type: application/json` and `body: JSON.stringify(payload ?? {})` with a `finally` block resetting loading states on error; route handlers safely read text and default empty bodies to `{}` while still catching malformed JSON.
+- Phase 6: Content and admin interfaces use localized `HQNav` navigation across all `/hq/*` sub-routes for direct navigation without cross-component coupling.
+- Phase 6: All admin content editing routes enforce strict locking rules: stem text is editable anytime; question/riddle options and answers lock once an attempt exists.
+- Phase 6: Settings API checks phase boundaries and rejects modifications with `SETTING_LOCKED` when the event progresses past the specified lock point.
+- Phase 6: Admin interventions (`admin_register`, `reset_attempts`, `set_captain`, `edit_team_n`, `set_qualified`) run atomically in Postgres (`005_phase6.sql`) and write to `admin_log`.
+- Phase 6: Export endpoints serve UTF-8 CSVs for registrations, attempts, and standings with correct tie-break and rank computation.

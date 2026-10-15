@@ -7,7 +7,8 @@
 - Phase 3: DONE (register_scan SQL verified with a real 30-way race: 1 success, 29 QR_FULL). Real-phone camera/Lens and link-preview checks NOT yet done
 - Phase 4: BUILT, SQL-tested on Postgres (sequential + concurrency).
 - Phase 5: DONE (Run timing, run 2 opening, deadlines, hard end & break, expired runs score 0, void_question, mark_absent, unmark_absent, cancel_registration)
-- Phases 6-9: NOT STARTED
+- Phase 6: DONE (Rest of admin panel: teams, interventions, dashboard detail, log, exports, settings, content CRUD)
+- Phases 7-9: NOT STARTED
 
 ## 2. Files
 app/page.tsx | server check of session, renders Game | lib/session, components/Game | route /
